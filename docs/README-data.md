@@ -1,3 +1,20 @@
+`.external_data/` 不随 Git 仓库一起提交。
+
+如果是第一次拿到这套仓库，需要先下载独立数据包，并把它解压到仓库根目录，保证最终直接存在：
+
+```text
+
+D:\catapro_delivery\.external_data\
+
+```
+
+数据包下载：
+
+- 百度网盘链接：`https://pan.baidu.com/s/18qYrdZkas9lwjg2SPEXbYg?pwd=kqkw`
+- 提取码：`kqkw`
+
+下载并解压完成后，再按本文件下面的目录结构去检查各个子目录是否齐全。
+
 运行文件导航：
 
 - `.external_data/`

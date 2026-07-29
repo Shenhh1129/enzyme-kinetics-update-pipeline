@@ -31,7 +31,7 @@
 - [`database_update_pipeline`](database_update_pipeline)
   - `raw_source` 旧 14 步黑盒源码。
   - 这里才是应维护的黑盒代码，release 工作区里的副本不要直接改。
-- [`.external_data`](.external_data)
+- [`.external_data`](.external_data)      
   - 运行数据根目录。
   - 放输入、release、current、history、workspace、正式输出和审计。
 - [`docs`](docs)
@@ -71,6 +71,21 @@
 ## 6. 关于 `.external_data`
 
 默认把大文件、原始数据、运行中间结果、正式输出、审计和历史记录都放在 `.external_data/` 下，而不是放进 Git。
+
+如果仓库里没有 `.external_data/`，请先从百度网盘下载数据包，再解压到仓库根目录，保证最终目录结构为：
+
+```text
+D:\catapro_delivery\
+├─ src\
+├─ docs\
+├─ database_update_pipeline\
+└─ .external_data\
+```
+
+数据包下载信息：
+
+- 百度网盘链接：`https://pan.baidu.com/s/18qYrdZkas9lwjg2SPEXbYg?pwd=kqkw`
+- 提取码：`kqkw`
 
 仓库本质上分成两层：
 
