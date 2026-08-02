@@ -18,6 +18,8 @@ FORMAL_PARAMETER_NAMES: tuple[str, ...] = ("kcat", "km", "kcat_km", "ph", "tempe
 FORMAL_RECORD_ID_PREFIX = "frid_"
 MEASUREMENT_UID_PREFIX = "muid_"
 AUTO_MATCH_EVIDENCE_FIELDS: tuple[str, ...] = ("uniprot", "sequence", "substrate", "smiles")
+ENTRY_MATCH_PRIMARY_FIELDS: tuple[str, ...] = ("uniprot", "sequence")
+ENTRY_MATCH_SECONDARY_FIELDS: tuple[str, ...] = ("substrate", "smiles")
 RECORD_ID_DISAMBIGUATION_FIELDS: tuple[str, ...] = ("organism", "ions")
 
 
@@ -81,8 +83,29 @@ def normalize_enzyme_type(value: object) -> str:
     return aliases.get(text, text)
 
 
+def _has_any_nonempty(row: pd.Series | dict[str, object], fields: tuple[str, ...]) -> bool:
+    return any(normalize_text(row.get(column, "")) for column in fields)
+
+
 def has_auto_match_evidence(row: pd.Series | dict[str, object]) -> bool:
     return any(normalize_text(row.get(column, "")) for column in AUTO_MATCH_EVIDENCE_FIELDS)
+
+
+def has_external_row_match_prerequisite(row: pd.Series | dict[str, object]) -> bool:
+    return _has_any_nonempty(row, ENTRY_MATCH_PRIMARY_FIELDS) and _has_any_nonempty(row, ENTRY_MATCH_SECONDARY_FIELDS)
+
+
+def external_source_row_requirement_issues(row: pd.Series | dict[str, object]) -> tuple[str, ...]:
+    issues: list[str] = []
+    if not normalize_parameter_name(row.get("parameter_name", "")):
+        issues.append("missing_parameter_name")
+    if not normalize_text(row.get("value", "")):
+        issues.append("missing_value")
+    if not _has_any_nonempty(row, ENTRY_MATCH_PRIMARY_FIELDS):
+        issues.append("missing_uniprot_or_sequence")
+    if not _has_any_nonempty(row, ENTRY_MATCH_SECONDARY_FIELDS):
+        issues.append("missing_substrate_or_smiles")
+    return tuple(issues)
 
 
 def normalize_frame_text(frame: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:

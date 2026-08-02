@@ -120,10 +120,14 @@
   - 次级匹配
 - 同一结果层内允许存在多条记录具有相同 `business_key`
 - `manual_override` 使用 `business_key` 匹配时，必须额外检查是否唯一命中；若命中多条，不得视为精准命中
-- 若 `uniprot`、`sequence`、`substrate`、`smiles` 四个字段同时为空，则该记录：
-  - 不参与自动业务去重
-  - 继续保留
-  - 必须进入审计，并标记为 `insufficient_match_evidence`
+- 对 `external_source` 而言，若一条记录不满足以下任一组门槛：
+  - `uniprot` / `sequence` 至少 1 个非空
+  - `substrate` / `smiles` 至少 1 个非空
+- 则该记录：
+  - 不允许自动并入正式结果
+  - 不进入正式业务去重
+  - 必须写入 `rejected_rows.csv`
+  - `reject_reason` 记录具体缺项原因
 
 ### 3.8 `record_key`
 
@@ -222,63 +226,52 @@
 
 （2）`external_source` 标准补充模板字段规则如下：
 
-基础必填字段：
+ 基础必填规则：
 
-- `parameter_name`
-- `value`
+  - parameter_name 非空
+  - value 非空
+  - uniprot / sequence 至少 1 个非空
+  - substrate / smiles 至少 1 个非空
+  - 只是想改现有记录，那不该走 external_source，应该走 manual_override
+  
 
-可补充的条目键字段：
+  可补充的条件与测量字段：
 
-- `uniprot`
-- `enzyme_type`
-- `mutation`
-- `sequence`
-- `substrate`
-- `smiles`
+  - `enzyme_type`
+  - `mutation`
+  - `unit`
+  - `ph`
+  - `temperature`
+  - `value_normalized`
+  - `unit_normalized`
+  - `enzyme_type`、`mutation` 不是门槛字段，但如果提供，就参与 business_key
 
-自动匹配证据门槛字段：
+  - 若未单独提供 `ph` 或 `temperature`，且该行 `parameter_name` 就是 `ph` 或 `temperature`，则允许由 `value` 回填到对应条件字段
+  - 若未提供 `value_normalized`，允许先回填自 `value`
+  - 若未提供 `unit_normalized`，允许先回填自 `unit`
 
-- `uniprot`
-- `sequence`
-- `substrate`
-- `smiles`
-- 这四个字段至少要有 1 个非空，才允许进入自动业务去重
-- 若这四个字段同时为空，该行保留，但不进入自动业务去重
-- `enzyme_type` 与 `mutation` 属于 `business_key` 组成字段，但不属于自动匹配证据门槛字段
+  可补充的来源追踪字段：
 
-可补充的条件与测量字段：
+  - `source_record_id`
+  - `source_db`
+  - `source_release`
+  - 缺失时由系统自动补齐，不要求输入者手动提供
+  - `source_record_id` 缺失时，按 `<source_file_stem>:<row_number>` 生成
+  - `source_db` 缺失时，默认写入本次来源类型
+  - `source_release` 缺失时，默认写入本次 `release_id`
 
-- `unit`
-- `ph`
-- `temperature`
-- `value_normalized`
-- `unit_normalized`
-- 若未单独提供 `ph` 或 `temperature`，且该行 `parameter_name` 就是 `ph` 或 `temperature`，则允许由 `value` 回填到对应条件字段
-- 若未提供 `value_normalized`，允许先回填自 `value`
-- 若未提供 `unit_normalized`，允许先回填自 `unit`
+  可补充的附加保留字段：
 
-可补充的来源追踪字段：
-
-- `source_record_id`
-- `source_db`
-- `source_release`
-- 缺失时由系统自动补齐，不要求输入者手工提供
-- `source_record_id` 缺失时，按 `<source_file_stem>:<row_number>` 生成
-- `source_db` 缺失时，默认写入本次来源类型
-- `source_release` 缺失时，默认写入本次 `release_id`
-
-可补充的附加保留字段：
-
-- `ec_number`
-- `organism`
-- `commentary`
-- `ions`
-- `sequence_source`
-- `parse_status`
-- 这些字段允许提供，但不作为 `external_source` 正式去重主键
+  - `ec_number`
+  - `organism`
+  - `commentary`
+  - `ions`
+  - `sequence_source`
+  - `parse_status`
+  - 这些字段允许提供，但不作为 `external_source` 正式去重主键
 
 
-`manual_override` patch 指令模板字段：
+  `manual_override` patch 指令模板字段：
 
   `manual_override` 只接受 patch 指令模板，不接受普通补充记录表。
 
@@ -763,9 +756,12 @@ s
    - `external_source` 若标准化成功率 `< 90%`，判定为 `fail`
    - `manual_override` 指令有效率必须 `100%`
 4. 业务键级检查
-   - `uniprot`、`sequence`、`substrate`、`smiles` 四个自动匹配证据字段不允许全部为空
-   - `external_source` 中“四证据全空”的记录占比 `> 5%` 时判定为 `fail`
-   - `external_source` 中“四证据全空”的记录占比 `> 1%` 且 `<= 5%` 时判定为 `pass_with_warning`
+   - `external_source` 的每一条记录都必须满足以下行级规则：
+     - `parameter_name` 非空
+     - `value` 非空
+     - `uniprot` / `sequence` 至少 1 个非空
+     - `substrate` / `smiles` 至少 1 个非空
+   - 任意一条记录不满足上述规则，均判定为 `fail`
 5. 条件字段检查
    - 若输入中声明了 `ph` / `temperature` / `value` / `unit` 等条件相关列，则必须可解析为统一字段
    - 条件列存在但整列完全不可解析时，判定为 `fail`
@@ -807,7 +803,10 @@ s
 - 同一输入表多个列映射到同一标准字段且无法唯一裁定
 - 关键业务键字段无法识别
 - `external_source` 标准化成功率 `< 90%`
-- `external_source` 中四个自动匹配证据字段全空记录占比 `> 5%`
+- `external_source` 任一记录 `parameter_name` 为空
+- `external_source` 任一记录 `value` 为空
+- `external_source` 任一记录同时缺少 `uniprot` 和 `sequence`
+- `external_source` 任一记录同时缺少 `substrate` 和 `smiles`
 - `manual_override` 任一指令缺少目标匹配信息
 - `manual_override` 任一指令缺少 `action`
 - `manual_override` 任一指令 `approved_by` 或 `approved_at` 缺失
@@ -822,7 +821,6 @@ s
 - 存在未使用的非关键列
 - 可选字段缺失
 - `external_source` 标准化成功率 `>= 90%` 且 `< 95%`
-- `external_source` 中四个自动匹配证据字段全空记录占比 `> 1%` 且 `<= 5%`
 - 某些记录字段值异常但不影响整体读取
 - 非必备列整列为空
 
@@ -1641,11 +1639,14 @@ raw_source 全量重跑黑盒旧链路，标准化形式不变，新增原始数
 
 自动匹配前提：
 
-- 如果 `uniprot`、`sequence`、`substrate`、`smiles` 四个字段同时为空，则该记录：
-  - 不参与自动业务去重
-  - 继续保留
-  - 必须写入 `conflicts.csv`
-  - `conflict_type` 固定记为 `insufficient_match_evidence`
+- 对 `external_source` 输入行，只有同时满足以下两组条件，才允许进入正式业务去重：
+  - `uniprot` / `sequence` 至少 1 个非空
+  - `substrate` / `smiles` 至少 1 个非空
+- 若不满足：
+  - 不进入正式业务去重
+  - 不进入正式 survivor 候选集合
+  - 必须写入 `rejected_rows.csv`
+  - `reject_reason` 记录具体缺项原因
 
 冲突拦截：
 
@@ -2660,7 +2661,7 @@ Warnings: none
   "validate_time": "2026-07-25T14:35:00+08:00",
   "source_type": "external_source",
   "input_path": "D:\\catapro_delivery\\.external_data\\incoming\\20260725_ext_batch_001\\external",
-  "status": "pass_with_warning",
+  "status": "pass",
   "can_run": true,
   "file_checks": {
     "input_file_count": 2,
@@ -2669,23 +2670,27 @@ Warnings: none
   },
   "schema_checks": {
     "required_columns": ["parameter_name", "value"],
+    "row_level_required_rules": [
+      "parameter_name must be non-empty",
+      "value must be non-empty",
+      "at least one of uniprot / sequence must be non-empty",
+      "at least one of substrate / smiles must be non-empty"
+    ],
     "missing_required_files": []
   },
   "quality_checks": {
     "standardized_row_count": 1200,
     "standardized_success_count": 1200,
-    "insufficient_match_evidence_count": 24
+    "insufficient_match_evidence_count": 0,
+    "missing_parameter_name_row_count": 0,
+    "missing_value_row_count": 0,
+    "missing_uniprot_or_sequence_row_count": 0,
+    "missing_substrate_or_smiles_row_count": 0
   },
-  "issues": [
-    {
-      "level": "warning",
-      "code": "insufficient_match_evidence_warning",
-      "message": "More than 1% of external rows have no automatic match evidence."
-    }
-  ],
+  "issues": [],
   "summary": {
     "input_file_count": 2,
-    "status": "pass_with_warning",
+    "status": "pass",
     "can_run": true
   }
 }
@@ -2697,15 +2702,14 @@ Warnings: none
 Release ID: 20260725-ext001
 Source type: external_source
 Input path: D:\catapro_delivery\.external_data\incoming\20260725_ext_batch_001\external
-Validation status: pass_with_warning
+Validation status: pass
 Can run: yes
 
 File checks: {"input_file_count": 2, "allowed_extensions": [".csv", ".json", ".tsv", ".xls", ".xlsx"], "bad_extensions": []}
-Schema checks: {"required_columns": ["parameter_name", "value"], "missing_required_files": []}
-Quality checks: {"standardized_row_count": 1200, "standardized_success_count": 1200, "insufficient_match_evidence_count": 24}
-Issues:
-- warning: insufficient_match_evidence_warning -> More than 1% of external rows have no automatic match evidence.
-Summary: {"input_file_count": 2, "status": "pass_with_warning", "can_run": true}
+Schema checks: {"required_columns": ["parameter_name", "value"], "row_level_required_rules": ["parameter_name must be non-empty", "value must be non-empty", "at least one of uniprot / sequence must be non-empty", "at least one of substrate / smiles must be non-empty"], "missing_required_files": []}
+Quality checks: {"standardized_row_count": 1200, "standardized_success_count": 1200, "insufficient_match_evidence_count": 0, "missing_parameter_name_row_count": 0, "missing_value_row_count": 0, "missing_uniprot_or_sequence_row_count": 0, "missing_substrate_or_smiles_row_count": 0}
+Issues: []
+Summary: {"input_file_count": 2, "status": "pass", "can_run": true}
 ```
 
 ### A.5 `run_summary.txt` 示例

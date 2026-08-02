@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from catapro_update_app.io.loaders import detect_format, discover_input_files
-from catapro_update_app.pipeline.formal import canonical_business_key_from_row, has_auto_match_evidence, normalize_text
+from catapro_update_app.pipeline.formal import canonical_business_key_from_row, external_source_row_requirement_issues, has_auto_match_evidence, normalize_text
 from catapro_update_app.pipeline.importer import StandardizedBatch
 from catapro_update_app.rules.policy import RulePolicy, SourceType
 from catapro_update_app.rules.registry import ALLOWED_OVERRIDE_ACTIONS, ALLOWED_OVERRIDE_MATCH_KEY_TYPES, BUSINESS_KEY_FIELDS, REQUIRED_EXTERNAL_COLUMNS, REQUIRED_MANUAL_OVERRIDE_COLUMNS
@@ -123,6 +123,10 @@ def validate_input_request(source_type: SourceType, input_path: Path, standardiz
     standardized_row_count = 0
     standardized_success_count = 0
     insufficient_match_evidence_count = 0
+    missing_parameter_name_row_count = 0
+    missing_value_row_count = 0
+    missing_uniprot_or_sequence_row_count = 0
+    missing_substrate_or_smiles_row_count = 0
     missing_required_files: list[str] = []
     if standardized_batch is not None:
         for item in standardized_batch.items:
@@ -133,7 +137,18 @@ def validate_input_request(source_type: SourceType, input_path: Path, standardiz
             else:
                 standardized_success_count += len(item.frame)
             if source_type == SourceType.EXTERNAL_SOURCE:
-                insufficient_match_evidence_count += int((~item.frame.apply(has_auto_match_evidence, axis=1)).sum())
+                for _, row in item.frame.iterrows():
+                    issues = set(external_source_row_requirement_issues(row))
+                    if "missing_parameter_name" in issues:
+                        missing_parameter_name_row_count += 1
+                    if "missing_value" in issues:
+                        missing_value_row_count += 1
+                    if "missing_uniprot_or_sequence" in issues:
+                        missing_uniprot_or_sequence_row_count += 1
+                    if "missing_substrate_or_smiles" in issues:
+                        missing_substrate_or_smiles_row_count += 1
+                    if "missing_uniprot_or_sequence" in issues or "missing_substrate_or_smiles" in issues:
+                        insufficient_match_evidence_count += 1
 
     if missing_required_files:
         for message in missing_required_files:
@@ -146,10 +161,14 @@ def validate_input_request(source_type: SourceType, input_path: Path, standardiz
                 _add_message(messages, "error", "low_standardization_success", f"External source standardization success rate is {success_rate:.2%}, below 90%.")
             elif success_rate < 0.95:
                 _add_message(messages, "warning", "standardization_success_warning", f"External source standardization success rate is {success_rate:.2%}.")
-            if insufficient_match_evidence_count / standardized_row_count > 0.05:
-                _add_message(messages, "error", "insufficient_match_evidence_fail", "More than 5% of external rows have no automatic match evidence.")
-            elif insufficient_match_evidence_count / standardized_row_count > 0.01:
-                _add_message(messages, "warning", "insufficient_match_evidence_warning", "More than 1% of external rows have no automatic match evidence.")
+            if missing_parameter_name_row_count:
+                _add_message(messages, "error", "missing_parameter_name_rows", f"External source has {missing_parameter_name_row_count} rows with empty parameter_name.")
+            if missing_value_row_count:
+                _add_message(messages, "error", "missing_value_rows", f"External source has {missing_value_row_count} rows with empty value.")
+            if missing_uniprot_or_sequence_row_count:
+                _add_message(messages, "error", "missing_uniprot_or_sequence_rows", f"External source has {missing_uniprot_or_sequence_row_count} rows missing both uniprot and sequence.")
+            if missing_substrate_or_smiles_row_count:
+                _add_message(messages, "error", "missing_substrate_or_smiles_rows", f"External source has {missing_substrate_or_smiles_row_count} rows missing both substrate and smiles.")
         if source_type == SourceType.MANUAL_OVERRIDE and standardized_success_count != standardized_row_count:
             _add_message(messages, "error", "invalid_manual_override_rows", "Manual override instructions must have all required columns present.")
 
@@ -173,12 +192,22 @@ def validate_input_request(source_type: SourceType, input_path: Path, standardiz
     }
     schema_checks = {
         "required_columns": list(required_columns),
+        "row_level_required_rules": [
+            "parameter_name must be non-empty",
+            "value must be non-empty",
+            "at least one of uniprot / sequence must be non-empty",
+            "at least one of substrate / smiles must be non-empty",
+        ] if source_type == SourceType.EXTERNAL_SOURCE else [],
         "missing_required_files": missing_required_files,
     }
     quality_checks = {
         "standardized_row_count": standardized_row_count,
         "standardized_success_count": standardized_success_count,
         "insufficient_match_evidence_count": insufficient_match_evidence_count,
+        "missing_parameter_name_row_count": missing_parameter_name_row_count,
+        "missing_value_row_count": missing_value_row_count,
+        "missing_uniprot_or_sequence_row_count": missing_uniprot_or_sequence_row_count,
+        "missing_substrate_or_smiles_row_count": missing_substrate_or_smiles_row_count,
     }
     summary = {
         "input_file_count": len(input_files),

@@ -20,6 +20,7 @@ from catapro_update_app.pipeline.formal import (
     ensure_control_columns,
     ensure_formal_identities,
     ensure_formal_schema,
+    external_source_row_requirement_issues,
     has_auto_match_evidence,
     normalize_parameter_name,
     normalize_text,
@@ -582,10 +583,32 @@ def _build_batch(frame: pd.DataFrame, source_type: SourceType, release_id: str, 
 
 def _split_external_rows(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     working = ensure_control_columns(frame.copy())
-    condition_rows = working.loc[working["parameter_name"].isin(("ph", "temperature"))].copy()
-    kinetic_rows = working.loc[working["parameter_name"].isin(("kcat", "km"))].copy()
-    supported_index = condition_rows.index.union(kinetic_rows.index)
-    rejected = working.loc[~working.index.isin(supported_index)].copy()
+    kinetic_payloads: list[dict[str, object]] = []
+    condition_payloads: list[dict[str, object]] = []
+    rejected_payloads: list[dict[str, object]] = []
+
+    for _, row in working.iterrows():
+        issues = list(external_source_row_requirement_issues(row))
+        payload = row.to_dict()
+        parameter_name = normalize_parameter_name(row.get("parameter_name", ""))
+        if issues:
+            payload["reject_reason"] = "|".join(issues)
+            rejected_payloads.append(payload)
+            continue
+        if parameter_name in {"kcat", "km"}:
+            kinetic_payloads.append(payload)
+            continue
+        if parameter_name in {"ph", "temperature"}:
+            condition_payloads.append(payload)
+            continue
+        payload["reject_reason"] = "unsupported_parameter_name"
+        rejected_payloads.append(payload)
+
+    kinetic_rows = pd.DataFrame(kinetic_payloads) if kinetic_payloads else working.iloc[0:0].copy()
+    condition_rows = pd.DataFrame(condition_payloads) if condition_payloads else working.iloc[0:0].copy()
+    rejected = pd.DataFrame(rejected_payloads) if rejected_payloads else working.iloc[0:0].copy()
+    if "reject_reason" not in rejected.columns:
+        rejected["reject_reason"] = ""
     return kinetic_rows, condition_rows, rejected
 
 
@@ -599,9 +622,10 @@ def _apply_external_condition_supplements(target_frames: dict[str, pd.DataFrame]
         if field_name not in {"ph", "temperature"} or not new_value:
             rejected_rows.append(patch.to_dict())
             continue
-        if not has_auto_match_evidence(patch):
+        issues = list(external_source_row_requirement_issues(patch))
+        if issues:
             rejected = patch.to_dict()
-            rejected["reject_reason"] = "insufficient_match_evidence"
+            rejected["reject_reason"] = "|".join(issues)
             rejected_rows.append(rejected)
             continue
         matched_any = False
@@ -1016,6 +1040,7 @@ def _run_external_source(paths: AppPaths, config: RunConfig, batch: Standardized
     incoming = pd.concat([item.frame for item in batch.items], ignore_index=True) if batch.items else pd.DataFrame()
     kinetic_rows, condition_rows, rejected_rows = _split_external_rows(incoming)
     current_merged, supplement_rejected, supplement_conflicts = _apply_external_condition_supplements(current_merged, condition_rows)
+    accepted_rows = pd.concat([kinetic_rows, condition_rows], ignore_index=True, sort=False) if not kinetic_rows.empty or not condition_rows.empty else incoming.iloc[0:0].copy()
 
     updated_master = {key: frame.copy() for key, frame in current_master.items()}
     updated_merged = {key: frame.copy() for key, frame in current_merged.items()}
@@ -1036,7 +1061,7 @@ def _run_external_source(paths: AppPaths, config: RunConfig, batch: Standardized
         updated_master[catapro_key] = ensure_control_columns(master_after_leakage)
 
     master_paths, merged_paths = _write_formal_outputs(paths, config.release_id, updated_master, updated_merged)
-    combined_batch = _build_batch(pd.concat([incoming], ignore_index=True), SourceType.EXTERNAL_SOURCE, config.release_id, "incoming.csv")
+    combined_batch = _build_batch(accepted_rows, SourceType.EXTERNAL_SOURCE, config.release_id, "incoming.csv")
     full_dedup = merge_and_deduplicate(combined_batch, existing_frame=pd.concat([current_merged["kcat"], current_merged["km"]], ignore_index=True))
     final_merged_frame = pd.concat([updated_merged["kcat"], updated_merged["km"]], ignore_index=True)
     leakage_removed_frame = pd.concat(leakage_removed_frames, ignore_index=True, sort=False) if leakage_removed_frames else final_merged_frame.iloc[0:0].copy()
