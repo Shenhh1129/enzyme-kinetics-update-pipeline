@@ -1,78 +1,90 @@
-# 酶活性数据更新仓库说明
+<div align="middle">
 
-该仓库用于维护酶活性数据的整套数据更新体系，覆盖三条链路：
+**English** | [简体中文](README_zh-CN.md)
+
+</div>
+
+# Enzyme Activity Data Update Repository
+
+This repository maintains the complete data update system for enzyme activity data and covers three update pipelines:
 
 - `raw_source`
 - `external_source`
 - `manual_override`
 
-同时管理：
+It also manages:
 
-- 更新脚本和应用代码
-- 旧黑盒 14 步链路
-- 输入校验、去重、条件表导出、审计和版本切换
-- `.external_data/` 下的 release、current、history、workspace 目录体系
+- Update scripts and application code
+- The legacy 14-step black-box pipeline
+- Input validation, deduplication, condition-table export, auditing, and version switching
+- The release, current, history, and workspace directory structure under `.external_data/`
 
-如果文档之间有冲突，以 [`docs/README-rules.md`](docs/README-rules.md) 为准。
+If any documentation conflicts, [`docs/README-rules.md`](docs/README-rules.md) takes precedence.
 
-## 1. 文档说明
+## 1. Documentation
 
-- 文档导航页：[`docs/index.md`](docs/index.md)
-- 规则：[`docs/README-rules.md`](docs/README-rules.md)
-- 运行：[`docs/README-run.md`](docs/README-run.md)
-- 脚本：[`docs/README-script.md`](docs/README-script.md)
-- `.external_data/` 目录结构：[`docs/README-data.md`](docs/README-data.md)
+- Documentation index: [`docs/index.md`](docs/index.md)
+- Rules: [`docs/README-rules.md`](docs/README-rules.md)
+- Running the pipeline: [`docs/README-run.md`](docs/README-run.md)
+- Scripts: [`docs/README-script.md`](docs/README-script.md)
+- `.external_data/` directory structure: [`docs/README-data.md`](docs/README-data.md)
 
-## 2. 仓库里主要有什么
+## 2. Main Repository Components
 
 - [`src`](src)
-  - 新链路应用代码。
-  - 负责 `plan / validate / run`、输入标准化、去重、conditions、summary、manifest、current 切换。
+  - Application code for the new pipeline.
+  - Responsible for `plan / validate / run`, input normalization, deduplication, conditions, summary, manifest generation, and switching `current`.
+
 - [`database_update_pipeline`](database_update_pipeline)
-  - `raw_source` 旧 14 步黑盒源码。
-  - 这里才是应维护的黑盒代码，release 工作区里的副本不要直接改。
-- [`.external_data`](.external_data)      
-  - 运行数据根目录。
-  - 放输入、release、current、history、workspace、正式输出和审计。
+  - Source code for the legacy 14-step `raw_source` black-box pipeline.
+  - This is the black-box code that should be maintained. Do not directly modify copies inside release workspaces.
+
+- [`.external_data`](.external_data)
+  - Root directory for runtime data.
+  - Stores inputs, releases, current data, history, workspaces, production outputs, and audit records.
+
 - [`docs`](docs)
-  - 规则或补充文档。
+  - Rules and supplementary documentation.
+
 - [`tests`](tests)
-  - 自动化测试。
+  - Automated tests.
 
-## 3. 一句话流程
+## 3. Workflow in One Sentence
 
-1. 把本次输入放进 `.external_data/incoming/<batch_id>/`
-2. 选定 `source-type` 和 `release_id`
-3. 执行 `plan`
-4. 执行 `validate`
-5. 执行 `run`
-6. 结果先写进 `.external_data/releases/<release_id>/`
-7. 审核通过后再切换 `.external_data/database/current/`
+1. Place the input data for the current batch in `.external_data/incoming/<batch_id>/`
+2. Select the `source-type` and `release_id`
+3. Run `plan`
+4. Run `validate`
+5. Run `run`
+6. Write the results first to `.external_data/releases/<release_id>/`
+7. After review and approval, switch `.external_data/database/current/`
 
-具体运行命令看 [`docs/README-run.md`](docs/README-run.md)。
+For detailed commands, see [`docs/README-run.md`](docs/README-run.md).
 
-## 4. 三条链路的定位
+## 4. Purpose of the Three Pipelines
 
 - `raw_source`
-  - 官方原始更新源。
-  - 走旧黑盒全量重建。
+  - Official raw update source.
+  - Uses the legacy black-box pipeline for a full rebuild.
+
 - `external_source`
-  - 普通外部补充数据。
-  - 走标准化、去重、conditions 导出和正式输出重建。
+  - Standard supplementary data from external sources.
+  - Uses normalization, deduplication, conditions export, and production-output rebuilding.
+
 - `manual_override`
-  - 人工审批后的 patch 指令。
-  - 用于精准修改正式结果。
+  - Manually approved patch instructions.
+  - Used for precise modifications to production results.
 
-## 5. 维护时最重要的两点
+## 5. Two Most Important Maintenance Rules
 
-- 改新链路逻辑时，优先改 [`src/catapro_update_app`](src/catapro_update_app)
-- 改 `raw_source` 黑盒逻辑时，改 [`database_update_pipeline`](database_update_pipeline)，不要直接改 `.external_data/releases/.../workspace/...` 里的运行副本
+- When modifying logic in the new pipeline, update [`src/catapro_update_app`](src/catapro_update_app) first.
+- When modifying the `raw_source` black-box logic, update [`database_update_pipeline`](database_update_pipeline). Do not directly modify runtime copies under `.external_data/releases/.../workspace/...`.
 
-## 6. 关于 `.external_data`
+## 6. About `.external_data`
 
-默认把大文件、原始数据、运行中间结果、正式输出、审计和历史记录都放在 `.external_data/` 下，而不是放进 Git。
+By default, large files, raw data, intermediate runtime results, production outputs, audit records, and historical records are stored under `.external_data/` rather than committed to Git.
 
-如果仓库里没有 `.external_data/`，请先从百度网盘下载数据包，再解压到仓库根目录，保证最终目录结构为：
+If the repository does not contain `.external_data/`, first download the data package from Baidu Netdisk and extract it into the repository root so that the final directory structure is:
 
 ```text
 D:\catapro_delivery\
@@ -82,14 +94,20 @@ D:\catapro_delivery\
 └─ .external_data\
 ```
 
-数据包下载信息：
+Data package download information:
 
-- 百度网盘链接：`https://pan.baidu.com/s/18qYrdZkas9lwjg2SPEXbYg?pwd=kqkw`
-- 提取码：`kqkw`
+- Baidu Netdisk link: `https://pan.baidu.com/s/18qYrdZkas9lwjg2SPEXbYg?pwd=kqkw`
+- Extraction code: `kqkw`
 
-仓库本质上分成两层：
+The repository is essentially divided into two layers:
 
-- Git 仓库层：代码、文档、测试、配置
-- 数据运行层：`.external_data/` 下的输入、release、current、history
+- Git repository layer: code, documentation, tests, and configuration
+- Runtime data layer: inputs, releases, current data, and history under `.external_data/`
 
-详细目录展开看 [`docs/README-data.md`](docs/README-data.md)。
+For the detailed directory structure, see [`docs/README-data.md`](docs/README-data.md).
+
+## 7. License
+
+The source code in this repository is licensed under the [Apache License 2.0](LICENSE), unless otherwise stated.
+
+The license does **not** automatically apply to third-party datasets, raw source data, or other externally obtained materials stored under `.external_data/`. Such materials remain subject to the terms, licenses, and usage restrictions of their original providers.
