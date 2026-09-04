@@ -4,7 +4,7 @@
 
 </div>
 
-# Enzyme Activity Data Update Repository
+# Enzyme Kinetics Update Pipeline
 
 This repository maintains the complete data update system for enzyme activity data and covers three update pipelines:
 
